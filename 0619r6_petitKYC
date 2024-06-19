@@ -1,0 +1,80 @@
+
+//RxユーザチェックUC部、プチpetitKYC部
+    //未設定時SBT状態。EOA/CA
+    mapping(address => bool) public userToUcRes;//UC-petitKYCフラグオン。
+    //UC用パスワードハッシュ
+    mapping(address => bytes32) public userToUcPwdHash;
+
+
+
+    //Ucチャレンジ　シークエンスsq1A
+    function s_sq1A_rxLimit_Uc_Cha_ByOwner(address account ,
+                                            string memory mailMes/*又はPwdハッシュ値直接*/,
+                                            string memory ownerPwd)
+    onlyPwdOwnerOne(ownerPwd) 
+    public
+    returns (address account_ ,bytes32 hash_)
+    {
+        //パスワードはレコードしない。元のメッセージハッシュ値は記録する。
+        userToUcPwdHash[account]=sha256(abi.encodePacked(mailMes));
+
+        //レコードしないけどハッシュを照合するためCha生成。Kcは長めの電子署名付与済みメール文でもいい。
+        return ( account  ,  userToUcPwdHash[account]);
+
+    }   
+        /*📨
+            owner post
+            include:[account,mailMes]
+
+            (email/paper mail hagaki) mes mail to user.
+            *crypted email / E2E SNS-SIGNAL? *SMS is ok too. 
+            *paper post🏣📮 is more better for "check if is user real human?" 
+        📨*/
+
+    //Ucレスポンス、シークエンスsq1B
+    //sq1A->sq1Bすること
+    //レスポンスOKなら送金受取制限解除
+    //サービスによっては本人限定郵便で送れるとよい。    
+    function s_sq1B_rxLimit_Uc_Res_ByUser (address account_, string memory mes_, string memory nowPwd) 
+    isPwdHashUser(nowPwd) //ユーザパス付でユーザ認証
+    public
+    returns (bool)
+    {
+        //入力者のEOAと検証用EOAシード比較
+        require(msg.sender == account_ , "err:msg.sender != account_");
+
+        //入力者のmesと検証用mesHashの比較
+        require(userToUcPwdHash[msg.sender] == sha256(abi.encodePacked(mes_)),"err");
+
+        userToUcRes[msg.sender]=true;//UC-KYC結果フラグオン。
+
+        return true;
+
+        //userToUcRes[msg.sender]=trueは受取を行うこと可能に。
+    }   
+
+            //ユーザに対するメモ部
+            mapping(address => bytes32) public userToOwnerLog;//ユーザメモやユーザ認証用オーナー書き込み部。認証用でなくてもいい。メモ部。コントラクトオーナー側とユーザでの通信時透明性の為パブリック
+            function set_userToOwnerLog_By_OwnerOne(address account , bytes32 logbytes32 , string memory pwd) 
+            public
+            onlyPwdOwnerOne(pwd) 
+            {
+                userToOwnerLog[account]= logbytes32;
+            }
+
+            //ここでパスワードハッシュ記録してからパスワードをユーザに郵送やメールで届けて認証し、認証通ったらミントする。
+            //そうでなければ購入をキャンセルさせることも…
+            //また要注意なEOAをこの関数で記録しておいて自社システムで用いることも。
+
+//ユーザからの送金限度額設定部=====================================================================
+    //1TXあたりの送金Txc限度部、ユーザ定義フラグ
+    mapping(address => uint256) private userToTxLimit_ByUser;
+
+    //全量転送設定可能関数
+    function s_txLimit_ByUser_PwdHash(uint256 amount , string memory nowPwd)
+    isPwdHashUser(nowPwd)
+    public
+    {
+        //送金額の制限なし
+        userToTxLimit_ByUser[msg.sender]=amount;//0から2**256-1
+    }    
