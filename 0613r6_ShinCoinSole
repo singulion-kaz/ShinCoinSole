@@ -1,0 +1,269 @@
+// SPDX-License-Identifier: MIT
+// Compatible with OpenZeppelin Contracts ^5.0.0
+
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Pausable.sol";
+
+
+contract ShinCoinSoleLBY is ERC20, ERC20Burnable, ERC20Pausable{
+
+    constructor(/*
+                address initialOwner1,
+                address initialOwner2,
+                bytes32 hash_owner1,
+                bytes32 hash_owner2
+                */)
+        ERC20("ShinCoin Sole - Log Byte prepaid Y", "SCS-LBY")
+    {
+        ownerVarChangeCnt=0;
+
+        ownerOne=msg.sender; /*ownerOne=initialOwner1;*/
+            ownerTwo=msg.sender;
+        
+        pwdHashOwnerOne=sha256("2014-204420_SC_SOLE_wqsql90-5e,iuggfixqfkh4q&!$#$%%*****%3ohf73oxyr4837t"); /*pwdHashOwnerOne=hash_owner1;*/
+            pwdHashOwnerTwo=sha256("2016-073366_SC_SOLE_wjgm****l5kdywgfewtt#%&#wrfrwhy,ydf5eduixowkhldwry2u");
+
+        total_Supply_Limit_By_owner1=10**6;
+            total_Supply_Limit_By_owner2=10**6;
+    }
+
+
+//Owner
+    uint256 public ownerVarChangeCnt;//変更記録,変更時ID
+    address public ownerOne;
+        address public ownerTwo;
+    bytes32 pwdHashOwnerOne;
+        bytes32 pwdHashOwnerTwo;
+
+
+    bool ownerOneSwitch=true;//trueでPauseなど実行許可
+        bool ownerTwoSwitch=true;//trueでPauseなど実行許可
+
+
+
+    // modifier to check if caller is owner1
+    modifier onlyPwdOwnerOne(string memory nowPwd) 
+    {
+        require(ownerOne==msg.sender,"not owner 1");   
+        require(pwdHashOwnerOne==sha256(abi.encodePacked(nowPwd)),"err:hash");   
+        _;
+    }
+        // modifier to check if caller is owner2
+        modifier onlyPwdOwnerTwo(string memory nowPwd) 
+        {
+            require(ownerTwo==msg.sender,"not owner 2");
+            require(pwdHashOwnerTwo==sha256(abi.encodePacked(nowPwd)),"err:hash");   
+            _;
+        }
+
+    //pause部1
+    function pauseByPwdOwnerOne(string memory pwd) 
+    public 
+    onlyPwdOwnerOne(pwd) 
+    {
+        _pause();
+    }
+    function unpauseByPwdOwnerOne(string memory pwd) 
+    public 
+    onlyPwdOwnerOne(pwd) 
+    {
+        _unpause();
+    }
+        //pause部2
+        function pauseByPwdOwnerTwo(string memory pwd) 
+        public 
+        onlyPwdOwnerTwo(pwd) 
+        {
+            _pause();
+        }
+        function unpauseByPwdOwnerTwo(string memory pwd) 
+        public 
+        onlyPwdOwnerTwo(pwd) 
+        {
+            _unpause();
+        }
+
+
+
+    //owner1で頻繁にミントしつつowner2は控えで緊急時にpwd入力のこと。
+    function mintByOwnerOne(address to, uint256 amount,string memory pwd) 
+    public 
+    onlyPwdOwnerOne(pwd) 
+    {
+        require(ownerOneSwitch==true,"ownerOne SW is false/off, not allowed!");
+            require(ownerTwoSwitch==true,"ownerTwo SW is false/off, not allowed!");
+        require(total_Supply_Limit_By_owner1 >= (totalSupply()+amount)," err:totalSupply()limited by owner1");
+            require(total_Supply_Limit_By_owner2 >= (totalSupply()+amount)," err:totalSupply()limited by owner2");
+        
+        _mint(to, amount);
+    }
+        //owner2控え
+        function mintByOwnerTwo(address to, uint256 amount,string memory pwd) 
+        public 
+        onlyPwdOwnerTwo(pwd) 
+        {
+            require(ownerOneSwitch==true,"ownerOne SW is false/off, not allowed!");
+                require(ownerTwoSwitch==true,"ownerTwo SW is false/off, not allowed!");
+            require(total_Supply_Limit_By_owner1 >= (totalSupply()+amount)," err:totalSupply()limited by owner1");
+                require(total_Supply_Limit_By_owner2 >= (totalSupply()+amount)," err:totalSupply()limited by owner2");
+            
+            _mint(to, amount);
+        }
+    //サプライ量上限変更部
+    uint256 public total_Supply_Limit_By_owner1;
+    function set_Approval_Of_Total_Supply_By_OwnerOne(uint256 new_Supply,string memory pwd) 
+    public
+    onlyPwdOwnerOne(pwd) 
+    {
+        ownerVarChangeCnt++;
+        total_Supply_Limit_By_owner1=new_Supply;
+    }
+        uint256 public total_Supply_Limit_By_owner2;
+        function set_Approval_Of_Total_Supply_By_OwnerTwo(uint256 new_Supply,string memory pwd) 
+        public
+        onlyPwdOwnerTwo(pwd) 
+        {
+            ownerVarChangeCnt++;
+            total_Supply_Limit_By_owner2=new_Supply;
+        }
+
+//ERC20PWDH ====================================
+    //知識パスワード認証で設定された送付限度額を超えての送付行わない機能を持つ転送部
+    // The following functions are overrides required by Solidity.
+
+    function _update(address from, address to, uint256 value)
+        internal
+        override(ERC20, ERC20Pausable)
+    {
+        //ユーザ設定の振込限度額量amount/valueが設定以内か
+        //知識型パスワード認証による資産送付保護部
+        require(userToTxLimit_ByUser[from] >= value, "err:value is limited by Txc user[EOA:from]");
+
+        //送付実行、update
+        super._update(from, to, value);
+    }
+
+
+//送金限度額設定部=====================================================================
+    //1TXあたりの送金Txc限度部、ユーザ定義フラグ
+    mapping(address => uint256) private userToTxLimit_ByUser;
+
+    //全量転送設定可能関数
+    function s_txcLimit_ByUser_withPin_withPwdHash(uint256 amount , string memory nowPin ,string memory nowPwd)
+    isPwdHashUser(nowPwd)
+    public
+    {
+        //送金額の制限なし
+        userToTxLimit_ByUser[msg.sender]=amount;//0から2**256-1
+    }   
+
+
+
+
+//知識型パスワード設定部=====================================================================
+//注意：パスワードのメッセージデータ忘れると送金できない
+
+    //ユーザ毎のPwdハッシュ
+    //アクセス用データ記録型PKI秘密鍵に加えて知識所有パスワードメッセージ式秘密キー。
+    mapping(address => bytes32) private userToPwdHash;
+
+//第1pwd部：isPwdHashUser、第１暗証、PINより大きめな
+//pwdハッシュ直接記録型認証部
+    //パスワードハッシュのユーザによる書き込み(saltなし) Log byte data by user/yser:LBY
+    function s_PwdHash_ByUser(bytes32 newPwdHash,string memory nowPwd)
+    public
+    {
+        if(userToPwdHash[msg.sender]==0x0){
+            //パスワード未定義、初期ゼロの時、
+            userToPwdHash[msg.sender] = newPwdHash;
+
+        }else {
+            require(userToPwdHash[msg.sender]==sha256(abi.encodePacked(nowPwd)),"err:pwd-hash different");
+            userToPwdHash[msg.sender] = newPwdHash;
+        }
+    }
+    //パスワードハッシュのユーザによる確認(あまりPwd暗証入力しないほうがいい関数）
+    //アクセス用データ記録型PKI秘密鍵に加えて知識所有パスワードメッセージ式秘密キー。
+    //ユーザの頭脳から手を使って端末に入力するときに何かしら漏れうる
+    function g_PwdHash_ByUser(string memory nowPwd)
+    public view
+    isPwdHashUser(nowPwd)
+    returns (bytes32)
+    {
+        return userToPwdHash[msg.sender];
+    }
+
+    // modifier to check if caller is [pwd]user [pwd:pwd of pwdHash first auth aikotoba] 
+    modifier isPwdHashUser(string memory nowPwd) {
+        
+        if(userToPwdHash[msg.sender]==0x0){
+            revert("err:logged pwd hash is 0x0");
+
+        }else {
+            require(userToPwdHash[msg.sender]==sha256(abi.encodePacked(nowPwd)),"err:pwd-hash different");
+        }    
+        _;
+    }
+
+
+
+
+
+//各ユーザのハッシュ部=====================================================================
+
+    mapping(address => uint256) public uToB32IdCnt;//ハッシュ値管理のハッシュIDのカウンター、一度限りのナンス。
+    mapping(address =>  mapping(uint256=>bytes32)) public uToIdToB32List;//ユーザのuint256番のバイト３２のハッシュ値List-mapping
+
+    //ハッシュ値でもいいByte32が見えるほうが、その人がそのメッセージ/ハッシュを扱っていると感じさせる。（なお任意のバイト値もありうるけど）
+
+    function read_IdToB32List_ByUser(uint256 _b32_Id)//hashを見る
+    public view
+    returns (bytes32)
+    {
+        return uToIdToB32List[msg.sender][_b32_Id];
+    }
+    
+    //SCLBYを消費しメッセージ・コメント・広告を設定する。自家型
+    //機械的に値上げすること可能にすべきか？ある年数後の最大価格が２％インフレ分にすべきか？
+
+    uint256 public write_B32_value=16;//
+    //16SCH(朱:SCH or LBY、ルビー紅玉)は1両なり。
+    //SCHはどちらかといえばステーブルコインとして作られたものでその自家利用先機能としてb32logを搭載する。logはおまけ
+
+
+
+    function write_B32_ToB32List_ByUser_Using_SCSLBY(bytes32 _B32,string memory nowPin)
+    public
+    isPinUser(nowPin)
+    returns (uint256 _Id)
+    {
+        //残高チェック
+        require(balanceOf(msg.sender)>write_B32_value,"Not enough SCS-LBY balance");
+
+        //カウンターインクリメント
+        uToB32IdCnt[msg.sender]=uToB32IdCnt[msg.sender]+1;        
+
+        //write-log-hash
+        uToIdToB32List[msg.sender][ uToB32IdCnt[msg.sender]  ]=_B32;
+        
+        //ログしたので消費
+        _burn(msg.sender, write_B32_value);
+        
+        return uToB32IdCnt[msg.sender];  
+    }
+
+    function read_Latest_B32_ByUser()
+    public view
+    returns (bytes32)
+    {
+        return uToIdToB32List[msg.sender][ uToB32IdCnt[msg.sender] ];
+    }
+
+
+
+
+
+
